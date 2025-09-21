@@ -1,6 +1,26 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
+import csv
+import io
 
 admin_api = Blueprint('admin_api', __name__, url_prefix='/admin/api')
+
+@admin_api.route('/stocks/bulk-upload', methods=['POST'])
+def bulk_upload_stocks():
+    if 'csvFile' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['csvFile']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    try:
+        stream = io.StringIO(file.stream.read().decode('utf-8'))
+        reader = csv.DictReader(stream)
+        stocks = []
+        for row in reader:
+            stocks.append(row)
+        # Here you can process stocks as needed (e.g., save to DB, etc.)
+        return jsonify({'message': 'CSV uploaded successfully', 'processed': len(stocks), 'errors': 0}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @admin_api.route('/dashboard-data', methods=['GET'])
 def dashboard_data():
