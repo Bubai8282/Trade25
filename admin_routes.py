@@ -1,18 +1,12 @@
-# Imports
 from flask import Blueprint, render_template, session, redirect, url_for, jsonify, request
-import datetime
-import csv
-import io
+import datetime, csv, io, json
 import models
 from app import db
 User = models.User
 Watchlist = models.Watchlist
-import json
-
 admin_bp = Blueprint('admin', __name__)
 
 def require_admin_session():
-    """Check if user is logged in as admin in session"""
     user_data = session.get('mock_user_data')
     if not user_data or not user_data.get('is_admin', False):
         return False
@@ -77,31 +71,25 @@ def require_admin_session():
         return False
     return True
 
+
 # Bulk upload stocks endpoint
 @admin_bp.route('/admin/api/stocks/bulk-upload', methods=['POST'])
 def bulk_upload_stocks():
-    """Bulk upload stocks from CSV file"""
     if not require_admin_session():
         return jsonify({'error': 'Unauthorized'}), 401
-
     if 'csvFile' not in request.files:
         return jsonify({'error': 'No CSV file provided'}), 400
-
     file = request.files['csvFile']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-
     if not file.filename or not file.filename.endswith('.csv'):
         return jsonify({'error': 'File must be a CSV file'}), 400
-
     try:
         stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
         csv_reader = csv.DictReader(stream)
-
         processed_count = 0
         error_count = 0
         errors = []
-
         admin_user = User.query.filter_by(is_admin=True).first()
         watchlist_types = ['entry', 'breakout', 'bulk-upload']
         for row_num, row in enumerate(csv_reader, start=2):
@@ -135,13 +123,13 @@ def bulk_upload_stocks():
                         wl = Watchlist(name=f"Admin {wl_type.title()} Stocks", user_id=admin_user.id, watchlist_type=wl_type)
                         db.session.add(wl)
                         db.session.commit()
-                    existing = [s for s in wl.stocks if s.get('symbol') == stock_data['symbol']]
-                    if existing:
-                        for s in wl.stocks:
-                            if s.get('symbol') == stock_data['symbol']:
-                                s.update(stock_data)
-                        wl.stocks = wl.stocks
-                    else:
+                    updated = False
+                    for idx, s in enumerate(wl.stocks):
+                        if s.get('symbol') == stock_data['symbol']:
+                            wl.stocks[idx] = stock_data
+                            updated = True
+                            break
+                    if not updated:
                         wl.add_stock(stock_data)
                     db.session.commit()
                 processed_count += 1
@@ -151,7 +139,6 @@ def bulk_upload_stocks():
             except Exception as e:
                 error_count += 1
                 errors.append(f"Row {row_num}: Error processing row - {str(e)}")
-
         bulk_watchlist = Watchlist.query.filter_by(user_id=admin_user.id, watchlist_type='bulk-upload').first()
         response_data = {
             'success': True,

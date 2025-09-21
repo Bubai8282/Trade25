@@ -114,11 +114,22 @@ def init_models(db):
             self.stocks_json = json.dumps(value or [])
 
         def add_stock(self, stock_data):
-            """Add a stock to the watchlist"""
+            """Add or update a stock in the watchlist by symbol, then persist."""
             current_stocks = self.stocks
-            current_stocks.append(stock_data)
+            symbol = stock_data.get('symbol')
+            updated = False
+            for idx, s in enumerate(current_stocks):
+                if s.get('symbol') == symbol:
+                    current_stocks[idx] = stock_data
+                    updated = True
+                    break
+            if not updated:
+                current_stocks.append(stock_data)
             self.stocks = current_stocks
             self.updated_at = datetime.utcnow()
+            from app import db
+            db.session.add(self)
+            db.session.commit()
 
         def remove_stock(self, symbol):
             """Remove a stock from the watchlist by symbol"""
