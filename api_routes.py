@@ -1,3 +1,22 @@
+from flask import Blueprint
+api = Blueprint('api', __name__, url_prefix='/api')
+
+# ...existing code...
+
+@api.route('/auth/mock-login', methods=['POST'])
+def api_mock_login():
+    """Mock login for development/testing only"""
+    data = request.get_json()
+    email = data.get('email', 'mockuser@example.com')
+    user_id = str(uuid.uuid4())
+    session['mock_user_data'] = {
+        'id': user_id,
+        'email': email,
+        'full_name': data.get('full_name', 'Mock User'),
+        'subscription_tier': data.get('subscription_tier', 'free'),
+        'is_admin': data.get('is_admin', False)
+    }
+    return jsonify({'user': session['mock_user_data'], 'message': 'Mock login successful'})
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_login import login_user, logout_user, current_user, login_required
@@ -16,7 +35,10 @@ def get_entry_zone_stocks_user():
     entry_lists = Watchlist.query.filter_by(watchlist_type='entry').all()
     stocks = []
     for wl in entry_lists:
-        stocks.extend(wl.stocks)
+        for stock in wl.stocks:
+            stock_dict = dict(stock)
+            stock_dict['bullish_reason'] = stock.get('bullish_reason', 'Strong price momentum and volume surge')
+            stocks.append(stock_dict)
     return jsonify({'success': True, 'stocks': stocks})
 
 @api.route('/stocks/breakout', methods=['GET'])
@@ -25,7 +47,10 @@ def get_breakout_stocks_user():
     breakout_lists = Watchlist.query.filter_by(watchlist_type='breakout').all()
     stocks = []
     for wl in breakout_lists:
-        stocks.extend(wl.stocks)
+        for stock in wl.stocks:
+            stock_dict = dict(stock)
+            stock_dict['bullish_reason'] = stock.get('bullish_reason', 'Breakout above resistance with high volume')
+            stocks.append(stock_dict)
     return jsonify({'success': True, 'stocks': stocks})
 
 @api.route('/auth/me', methods=['GET'])
@@ -92,8 +117,7 @@ def api_login():
         return jsonify({'error': 'Email and password are required'}), 400
     
     user = User.query.filter_by(email=email).first()
-    
-    if user and check_password_hash(user.password_hash, password):
+    if user and user.password_hash and check_password_hash(user.password_hash, password):
         login_user(user)
         user_data = {
             'id': user.id,
@@ -103,7 +127,6 @@ def api_login():
             'is_admin': user.is_admin
         }
         return jsonify({'user': user_data, 'message': 'Login successful'})
-    
     return jsonify({'error': 'Invalid email or password'}), 401
 
 

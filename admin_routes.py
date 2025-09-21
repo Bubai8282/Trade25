@@ -1,4 +1,4 @@
-
+# Imports
 from flask import Blueprint, render_template, session, redirect, url_for, jsonify, request
 import datetime
 import csv
@@ -11,6 +11,173 @@ import json
 
 admin_bp = Blueprint('admin', __name__)
 
+def require_admin_session():
+    """Check if user is logged in as admin in session"""
+    user_data = session.get('mock_user_data')
+    if not user_data or not user_data.get('is_admin', False):
+        return False
+    return True
+
+
+# Add single stock to bulk-upload watchlist
+@admin_bp.route('/admin/api/stocks', methods=['POST'])
+def add_single_stock():
+    if not require_admin_session():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    required_fields = ['symbol', 'name', 'sector', 'price', 'change_percent']
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        return jsonify({'error': f'Missing fields: {', '.join(missing)}'}), 400
+    stock_data = {
+        'symbol': data['symbol'].strip().upper(),
+        'name': data['name'].strip(),
+        'sector': data['sector'].strip(),
+        'price': float(data['price']),
+        'change_percent': float(data['change_percent'])
+    }
+    # Add stock to all admin watchlists: entry, breakout, bulk-upload
+    admin_user = User.query.filter_by(is_admin=True).first()
+    watchlist_types = ['entry', 'breakout', 'bulk-upload']
+    for wl_type in watchlist_types:
+        wl = Watchlist.query.filter_by(user_id=admin_user.id, watchlist_type=wl_type).first()
+        if not wl:
+            wl = Watchlist(name=f"Admin {wl_type.title()} Stocks", user_id=admin_user.id, watchlist_type=wl_type)
+            db.session.add(wl)
+            db.session.commit()
+        wl.add_stock(stock_data)
+        db.session.commit()
+    return jsonify({'success': True, 'message': 'Stock added successfully!', 'stock': stock_data})
+
+# Get all stocks in bulk-upload watchlist (for admin dashboard)
+@admin_bp.route('/admin/api/stocks', methods=['GET'])
+def get_bulk_upload_stocks():
+    if not require_admin_session():
+        return jsonify({'error': 'Unauthorized'}), 401
+    admin_watchlist = Watchlist.query.filter_by(watchlist_type='bulk-upload').first()
+    stocks = admin_watchlist.stocks if admin_watchlist else []
+    return jsonify({'success': True, 'stocks': stocks})
+# Imports
+from flask import Blueprint, render_template, session, redirect, url_for, jsonify, request
+import datetime
+import csv
+import io
+import models
+from app import db
+User = models.User
+Watchlist = models.Watchlist
+import json
+
+
+
+def require_admin_session():
+    """Check if user is logged in as admin in session"""
+    user_data = session.get('mock_user_data')
+    if not user_data or not user_data.get('is_admin', False):
+        return False
+    return True
+
+# Bulk upload stocks endpoint
+@admin_bp.route('/admin/api/stocks/bulk-upload', methods=['POST'])
+def bulk_upload_stocks():
+    """Bulk upload stocks from CSV file"""
+    if not require_admin_session():
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if 'csvFile' not in request.files:
+        return jsonify({'error': 'No CSV file provided'}), 400
+
+    file = request.files['csvFile']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not file.filename or not file.filename.endswith('.csv'):
+        return jsonify({'error': 'File must be a CSV file'}), 400
+
+    try:
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.DictReader(stream)
+
+        processed_count = 0
+        error_count = 0
+        errors = []
+
+        admin_user = User.query.filter_by(is_admin=True).first()
+        watchlist_types = ['entry', 'breakout', 'bulk-upload']
+        for row_num, row in enumerate(csv_reader, start=2):
+            try:
+                market_cap = row.get('market_cap') or row.get('market_c') or row.get('market_ce')
+                required_fields = ['symbol', 'industry', 'market_cap_formatted', 'latest_volume', 'mrs_current', 'weekly_growth', 'total_stocks', 'total_market_cap_formatted', 'price_vs_sma_pct']
+                missing_fields = [field for field in required_fields if not row.get(field, '').strip()]
+                if not market_cap or not row.get('symbol', '').strip():
+                    error_count += 1
+                    errors.append(f"Row {row_num}: Missing required fields: symbol, market_cap")
+                    continue
+                if missing_fields:
+                    error_count += 1
+                    errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)}")
+                    continue
+                stock_data = {
+                    'symbol': row['symbol'].strip().upper(),
+                    'industry': row['industry'].strip(),
+                    'market_cap': float(market_cap),
+                    'market_cap_formatted': row['market_cap_formatted'].strip(),
+                    'latest_volume': int(row['latest_volume']),
+                    'mrs_current': float(row['mrs_current']),
+                    'weekly_growth': float(row['weekly_growth']),
+                    'total_stocks': int(row['total_stocks']),
+                    'total_market_cap_formatted': row['total_market_cap_formatted'].strip(),
+                    'price_vs_sma_pct': float(row['price_vs_sma_pct'])
+                }
+                for wl_type in watchlist_types:
+                    wl = Watchlist.query.filter_by(user_id=admin_user.id, watchlist_type=wl_type).first()
+                    if not wl:
+                        wl = Watchlist(name=f"Admin {wl_type.title()} Stocks", user_id=admin_user.id, watchlist_type=wl_type)
+                        db.session.add(wl)
+                        db.session.commit()
+                    existing = [s for s in wl.stocks if s.get('symbol') == stock_data['symbol']]
+                    if existing:
+                        for s in wl.stocks:
+                            if s.get('symbol') == stock_data['symbol']:
+                                s.update(stock_data)
+                        wl.stocks = wl.stocks
+                    else:
+                        wl.add_stock(stock_data)
+                    db.session.commit()
+                processed_count += 1
+            except ValueError as e:
+                error_count += 1
+                errors.append(f"Row {row_num}: Invalid data format - {str(e)}")
+            except Exception as e:
+                error_count += 1
+                errors.append(f"Row {row_num}: Error processing row - {str(e)}")
+
+        bulk_watchlist = Watchlist.query.filter_by(user_id=admin_user.id, watchlist_type='bulk-upload').first()
+        response_data = {
+            'success': True,
+            'message': f'CSV processed successfully! {processed_count} stocks processed.',
+            'processed': processed_count,
+            'errors': error_count,
+            'total_stocks': len(bulk_watchlist.stocks) if bulk_watchlist else 0
+        }
+        if errors:
+            response_data['error_details'] = errors[:10]
+        return jsonify(response_data)
+    except Exception as e:
+        return jsonify({'error': f'Failed to process CSV file: {str(e)}'}), 500
+
+from flask import Blueprint, render_template, session, redirect, url_for, jsonify, request
+import datetime
+import csv
+import io
+import models
+from app import db
+User = models.User
+Watchlist = models.Watchlist
+import json
+
+
+
 from flask import Blueprint, render_template, session, redirect, url_for, jsonify, request
 import datetime
 import csv
@@ -19,7 +186,7 @@ from models import StockScreening
 from app import db
 import json
 
-admin_bp = Blueprint('admin', __name__)
+
 
 def require_admin_session():
     """Check if user is logged in as admin in session"""
@@ -486,215 +653,7 @@ def bulk_upgrade_users():
         'updated_count': updated_count
     })
 
-@admin_bp.route('/admin/api/stocks', methods=['GET'])
-def get_all_stocks():
-    """Get all stocks for management"""
-    return jsonify({
-        'success': True,
-        'stocks': MOCK_STOCKS
-    })
 
 @admin_bp.route('/admin/api/stocks/by-industry', methods=['GET'])
 def get_stocks_by_industry():
     """Get stocks organized by industry"""
-    industry_groups = {}
-    
-    for stock in MOCK_STOCKS:
-        industry_type = stock.get('industry_type', 'Other')
-        industry_code = stock.get('industry_code', 'N/A')
-        sector = stock.get('sector', 'Other')
-        
-        # Group by sector first, then by industry type
-        if sector not in industry_groups:
-            industry_groups[sector] = {}
-        
-        if industry_type not in industry_groups[sector]:
-            industry_groups[sector][industry_type] = {
-                'industry_code': industry_code,
-                'stocks': []
-            }
-        
-        industry_groups[sector][industry_type]['stocks'].append(stock)
-    
-    return jsonify({
-        'success': True,
-        'industries': industry_groups,
-        'total_stocks': len(MOCK_STOCKS)
-    })
-
-
-@admin_bp.route('/admin/api/stocks', methods=['POST'])
-def add_stock():
-    """Add a new stock to a watchlist (Entry Zone or Breakout)"""
-    if not require_admin_session():
-        return jsonify({'error': 'Unauthorized'}), 401
-
-    data = request.get_json()
-    symbol = data.get('symbol', '').upper()
-    name = data.get('name', '')
-    sector = data.get('sector', '')
-    price = float(data.get('price', 0))
-    change_percent = float(data.get('change_percent', 0))
-    watchlist_type = data.get('watchlist_type', 'entry')  # 'entry' or 'breakout'
-
-    # Find or create the admin's watchlist for the given type
-
-    admin_user = User.query.filter_by(email='admin@tradinggrow.com').first()
-    if not admin_user:
-        # Create admin user if missing
-        try:
-            admin_user = User(email='admin@tradinggrow.com', full_name='Admin User', is_admin=True)
-            db.session.add(admin_user)
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Failed to create admin user: {str(e)}'}), 500
-
-    watchlist = Watchlist.query.filter_by(user_id=admin_user.id, watchlist_type=watchlist_type).first()
-    if not watchlist:
-        try:
-            watchlist = Watchlist(name=f"Admin {watchlist_type.title()} Stocks", user_id=admin_user.id, watchlist_type=watchlist_type)
-            db.session.add(watchlist)
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Failed to create watchlist: {str(e)}'}), 500
-
-    # Add the stock to the watchlist
-    stock_data = {
-        'symbol': symbol,
-        'name': name,
-        'sector': sector,
-        'price': price,
-        'change_percent': change_percent
-    }
-    try:
-        watchlist.add_stock(stock_data)
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Failed to add stock: {str(e)}'}), 500
-
-    return jsonify({
-        'success': True,
-        'message': f'Stock added to {watchlist_type} watchlist',
-        'stock': stock_data
-    })
-
-@admin_bp.route('/admin/api/stocks/<stock_id>', methods=['DELETE'])
-def delete_stock(stock_id):
-    """Delete a stock"""
-    if not require_admin_session():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    global MOCK_STOCKS
-    MOCK_STOCKS = [s for s in MOCK_STOCKS if s['id'] != stock_id]
-    
-    return jsonify({
-        'success': True,
-        'message': 'Stock removed successfully'
-    })
-
-@admin_bp.route('/admin/api/stocks/<stock_id>/price', methods=['PUT'])
-def update_stock_price(stock_id):
-    """Update stock price"""
-    if not require_admin_session():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    data = request.get_json()
-    new_price = float(data.get('price', 0))
-    
-    for stock in MOCK_STOCKS:
-        if stock['id'] == stock_id:
-            old_price = stock['price']
-            stock['price'] = new_price
-            # Calculate change percentage
-            if old_price > 0:
-                stock['change_percent'] = ((new_price - old_price) / old_price) * 100
-            return jsonify({'success': True, 'message': 'Stock price updated'})
-    
-    return jsonify({'error': 'Stock not found'}), 404
-
-@admin_bp.route('/admin/api/stocks/bulk-upload', methods=['POST'])
-def bulk_upload_stocks():
-    """Bulk upload stocks from CSV file"""
-    if not require_admin_session():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    if 'csvFile' not in request.files:
-        return jsonify({'error': 'No CSV file provided'}), 400
-    
-    file = request.files['csvFile']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    if not file.filename or not file.filename.endswith('.csv'):
-        return jsonify({'error': 'File must be a CSV file'}), 400
-    
-    try:
-        # Read CSV file content
-        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-        csv_reader = csv.DictReader(stream)
-        
-        processed_count = 0
-        error_count = 0
-        errors = []
-        
-        global MOCK_STOCKS
-        
-        for row_num, row in enumerate(csv_reader, start=2):  # Start from 2 to account for header
-            try:
-                # Validate required fields
-                required_fields = ['symbol', 'industry', 'market_cap', 'market_cap_formatted', 'latest_volume', 'mrs_current', 'weekly_growth', 'total_stocks', 'total_market_cap_formatted', 'price_vs_sma_pct']
-                missing_fields = [field for field in required_fields if not row.get(field, '').strip()]
-                if missing_fields:
-                    error_count += 1
-                    errors.append(f"Row {row_num}: Missing required fields: {', '.join(missing_fields)}")
-                    continue
-                # Process the stock data
-                stock_data = {
-                    'id': str(len(MOCK_STOCKS) + processed_count + 1),
-                    'symbol': row['symbol'].strip().upper(),
-                    'industry': row['industry'].strip(),
-                    'market_cap': float(row['market_cap']),
-                    'market_cap_formatted': row['market_cap_formatted'].strip(),
-                    'latest_volume': int(row['latest_volume']),
-                    'mrs_current': float(row['mrs_current']),
-                    'weekly_growth': float(row['weekly_growth']),
-                    'total_stocks': int(row['total_stocks']),
-                    'total_market_cap_formatted': row['total_market_cap_formatted'].strip(),
-                    'price_vs_sma_pct': float(row['price_vs_sma_pct'])
-                }
-                # Check for duplicate symbols
-                existing_stock = next((s for s in MOCK_STOCKS if s['symbol'] == stock_data['symbol']), None)
-                if existing_stock:
-                    existing_stock.update(stock_data)
-                    existing_stock['id'] = existing_stock['id']
-                else:
-                    MOCK_STOCKS.append(stock_data)
-                processed_count += 1
-            except ValueError as e:
-                error_count += 1
-                errors.append(f"Row {row_num}: Invalid data format - {str(e)}")
-            except Exception as e:
-                error_count += 1
-                errors.append(f"Row {row_num}: Error processing row - {str(e)}")
-        
-        # Prepare response
-        response_data = {
-            'success': True,
-            'message': f'CSV processed successfully! {processed_count} stocks processed.',
-            'processed': processed_count,
-            'errors': error_count,
-            'total_stocks': len(MOCK_STOCKS)
-        }
-        
-        if errors:
-            response_data['error_details'] = errors[:10]  # Limit to first 10 errors
-            
-        return jsonify(response_data)
-        
-    except Exception as e:
-        return jsonify({
-            'error': f'Failed to process CSV file: {str(e)}'
-        }), 500

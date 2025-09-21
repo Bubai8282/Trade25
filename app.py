@@ -56,9 +56,12 @@ if microsoft_bp:
 from models import init_models
 User, Watchlist, StockScreening, SubscriptionRequest = init_models(db)
 
-# Set models in the models module for other imports
 import models
 models.User = User
+
+# Register admin API blueprint
+from admin_api_routes import admin_api
+app.register_blueprint(admin_api)
 models.Watchlist = Watchlist
 models.StockScreening = StockScreening
 models.SubscriptionRequest = SubscriptionRequest

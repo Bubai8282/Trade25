@@ -161,7 +161,7 @@ const StockScreening = () => {
                         </div>
                         <div className="card-body">
                             {selectedScreening ? (
-                                <ChartVision />
+                                <ChartVision screening={selectedScreening} />
                             ) : (
                                 <div className="text-center py-4">
                                     <i className="fas fa-chart-bar fa-2x text-muted mb-3"></i>

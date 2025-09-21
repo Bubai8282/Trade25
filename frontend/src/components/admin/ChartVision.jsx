@@ -1,3 +1,18 @@
+// Fallback: define generateStockData if not imported
+function generateStockData(n = 200) {
+  const data = [];
+  let price = 100;
+  for (let i = 0; i < n; i++) {
+    price += (Math.random() - 0.5) * 2;
+    data.push({
+      date: `2025-09-${String(i+1).padStart(2,'0')}`,
+      time: '09:30',
+      price,
+      movingAvg: i === 0 ? price : (data[i-1].price + price) / 2,
+    });
+  }
+  return data;
+}
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -33,7 +48,26 @@ export default function ChartVision() {
     setIsClient(true);
   }, []);
 
-  const allData = useMemo(() => generateStockData(200), []);
+  // Accept screening prop
+  const { screening } = arguments[0] || {};
+
+  // Use screening results if available, else fallback to generated data
+  const allData = useMemo(() => {
+    if (screening && screening.results_data && screening.results_data.stocks) {
+      // Map stocks to chart data format: { date, time, price, movingAvg }
+      return screening.results_data.stocks.map((stock, idx, arr) => {
+        // Calculate moving average (window size 2 for demo)
+        const movingAvg = idx === 0 ? stock.price : (arr[idx - 1].price + stock.price) / 2;
+        return {
+          date: stock.date || `2025-09-${String(idx+1).padStart(2,'0')}`,
+          time: stock.time || '09:30',
+          price: stock.price,
+          movingAvg,
+        };
+      });
+    }
+    return generateStockData(200);
+  }, [screening]);
 
   const [zoomRange, setZoomRange] = useState({
     startIndex: 0,
@@ -143,8 +177,18 @@ export default function ChartVision() {
             <Line
               type="monotone"
               dataKey="price"
-              stroke="hsl(var(--primary))"
+              stroke="blue"
               strokeWidth={2}
+              dot={false}
+              isAnimationActive={true}
+              animationDuration={300}
+            />
+            <Line
+              type="monotone"
+              dataKey="movingAvg"
+              stroke="red"
+              strokeWidth={2}
+              strokeDasharray="8 4"
               dot={false}
               isAnimationActive={true}
               animationDuration={300}

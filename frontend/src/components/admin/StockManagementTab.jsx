@@ -339,7 +339,13 @@ const StockManagementTab = ({ stocks, onRefresh }) => {
                                     type="button" 
                                     className="btn btn-primary"
                                     onClick={handleAddStock}
-                                    disabled={!newStock.symbol || !newStock.name}
+                                    disabled={
+                                        !newStock.symbol ||
+                                        !newStock.name ||
+                                        !newStock.sector ||
+                                        !newStock.price ||
+                                        !newStock.change_percent
+                                    }
                                 >
                                     Add Stock
                                 </button>

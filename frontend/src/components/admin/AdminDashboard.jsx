@@ -384,6 +384,13 @@ const AdminDashboard = ({ initialData }) => {
                                                 stroke="#0d6efd" 
                                                 strokeWidth={3} 
                                             />
+                                            <Line
+                                                type="monotone"
+                                                dataKey="movingAvg"
+                                                stroke="red"
+                                                strokeWidth={2}
+                                                strokeDasharray="8 4"
+                                            />
                                         </LineChart>
                                     </ResponsiveContainer>
                                 </div>

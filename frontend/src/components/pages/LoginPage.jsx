@@ -37,7 +37,8 @@ const LoginPage = ({ onLogin }) => {
     }, []);
 
     const tryMockLogin = async (formData, isAdminLogin) => {
-        const mockEndpoint = isAdminLogin ? '/api/mock/admin/login' : '/api/mock/login';
+    // Use new mock login endpoint for all demo logins
+    const mockEndpoint = '/api/auth/mock-login';
         
         try {
             const response = await fetch(mockEndpoint, {
@@ -72,48 +73,14 @@ const LoginPage = ({ onLogin }) => {
         setError('');
         setMockMode(false);
 
-        // Check if this is an admin login attempt
+        // Always use mock login for development
         const isAdminLogin = window.location.pathname.includes('/admin');
-        const endpoint = isAdminLogin ? '/admin/login' : '/api/auth/login';
-
-        try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData)
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                if (isAdminLogin) {
-                    // For admin login, redirect to admin dashboard
-                    onLogin(data.user);
-                    window.location.href = '/admin/dashboard';
-                } else {
-                    // For regular user login, go to invitation page first
-                    onLogin(data.user);
-                    navigate('/invitation');
-                }
-            } else {
-                // If regular auth fails, try mock auth
-                const mockSuccess = await tryMockLogin(formData, isAdminLogin);
-                if (!mockSuccess) {
-                    setError(data.error || 'Login failed');
-                }
-            }
-        } catch (error) {
-            // If network error, try mock auth as fallback
-            const mockSuccess = await tryMockLogin(formData, isAdminLogin);
-            if (!mockSuccess) {
-                setError('Network error. Please try again or use demo login below.');
-                setShowTestUsers(true);
-            }
-        } finally {
-            setLoading(false);
+        const mockSuccess = await tryMockLogin(formData, isAdminLogin);
+        if (!mockSuccess) {
+            setError('Mock login failed. Please try again or use demo login below.');
+            setShowTestUsers(true);
         }
+        setLoading(false);
     };
 
     const quickLogin = (user) => {

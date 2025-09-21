@@ -30,6 +30,25 @@ def add_sample_stocks():
         breakout_watchlist.add_stock({'symbol': 'NVDA', 'name': 'NVIDIA Corp.', 'sector': 'Technology', 'price': 700.00, 'change_percent': 5.0})
         db.session.commit()
 
+
+
+    # Proxy middleware configuration for React app
+    # const { createProxyMiddleware } = require('http-proxy-middleware');
+    #
+    # module.exports = function(app) {
+    #   app.use(
+    #     ['/api', '/admin'],
+    #     createProxyMiddleware({
+    #       target: 'http://localhost:5000',
+    #       changeOrigin: true,
+    #     })
+    #   );
+    # };
+ 
+    # Mock login for admin user
+    import requests
+
+
 if __name__ == '__main__':
     with app.app_context():
         add_sample_stocks()
